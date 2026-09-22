@@ -10,7 +10,12 @@ from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from garmin_mcp.garmin_client import GarminAuthError, get_client
+from garmin_mcp.garmin_client import GarminAuthError, connect, get_client, is_connected
+
+# The MCP server (stdio/Claude Desktop use case) stays single-account, driven
+# by GARMIN_EMAIL/GARMIN_PASSWORD env vars, unlike the multi-user REST API in
+# http_api.py used by other services.
+_MCP_USER_ID = "default"
 
 LOGIN_PAGE = """<!doctype html>
 <html><head><title>garmin-mcp</title></head>
@@ -93,7 +98,13 @@ def _today() -> str:
 
 def _call(fn, *args, **kwargs) -> Any:
     try:
-        client = get_client()
+        if not is_connected(_MCP_USER_ID):
+            email = os.environ.get("GARMIN_EMAIL")
+            password = os.environ.get("GARMIN_PASSWORD")
+            if not email or not password:
+                raise GarminAuthError("GARMIN_EMAIL and GARMIN_PASSWORD environment variables must be set.")
+            connect(_MCP_USER_ID, email, password)
+        client = get_client(_MCP_USER_ID)
         return getattr(client, fn)(*args, **kwargs)
     except GarminAuthError as exc:
         return {"error": str(exc)}
