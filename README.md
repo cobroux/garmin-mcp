@@ -41,7 +41,53 @@ GARMIN_PASSWORD=ton-mot-de-passe
 > ton client MCP. Ne commit jamais ce fichier (il est dans `.gitignore`).
 > Les comptes avec MFA activée ne sont pas supportés par ce flux automatique.
 
-## Utilisation avec Claude Desktop / Claude Code
+## Lancer avec Docker
+
+Pas besoin d'installer Python ni les dépendances : construis l'image une fois,
+puis lance-la avec une seule commande. Le volume `garmin-mcp-data` conserve le
+token de session entre deux lancements (pas de nouveau login à chaque fois).
+
+```bash
+docker build -t garmin-mcp .
+
+docker run --rm -i \
+  -e GARMIN_EMAIL="ton-email@example.com" \
+  -e GARMIN_PASSWORD="ton-mot-de-passe" \
+  -v garmin-mcp-data:/data \
+  garmin-mcp
+```
+
+Une fois le token mis en cache dans le volume, tu peux relancer sans les
+variables d'environnement :
+
+```bash
+docker run --rm -i -v garmin-mcp-data:/data garmin-mcp
+```
+
+### Config Claude Desktop / Claude Code avec Docker
+
+```json
+{
+  "mcpServers": {
+    "garmin": {
+      "command": "docker",
+      "args": [
+        "run", "--rm", "-i",
+        "-e", "GARMIN_EMAIL",
+        "-e", "GARMIN_PASSWORD",
+        "-v", "garmin-mcp-data:/data",
+        "garmin-mcp"
+      ],
+      "env": {
+        "GARMIN_EMAIL": "ton-email@example.com",
+        "GARMIN_PASSWORD": "ton-mot-de-passe"
+      }
+    }
+  }
+}
+```
+
+## Utilisation avec Claude Desktop / Claude Code (sans Docker)
 
 Ajoute à ta config MCP (`claude_desktop_config.json` ou équivalent) :
 
