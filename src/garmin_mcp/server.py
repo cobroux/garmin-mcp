@@ -3,13 +3,88 @@
 from __future__ import annotations
 
 import datetime as dt
+import os
 from typing import Any
 
 from mcp.server.fastmcp import FastMCP
+from starlette.requests import Request
+from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from garmin_mcp.garmin_client import GarminAuthError, get_client
 
-mcp = FastMCP("garmin-mcp")
+LOGIN_PAGE = """<!doctype html>
+<html><head><title>garmin-mcp</title></head>
+<body style="font-family: sans-serif; max-width: 420px; margin: 80px auto;">
+<h2>garmin-mcp</h2>
+<p>Enter the app password to authorize this client.</p>
+<form method="post" action="/login">
+<input type="hidden" name="pending" value="{pending}">
+<input type="password" name="password" autofocus
+  style="width:100%;padding:8px;margin-bottom:12px;box-sizing:border-box;"
+  placeholder="App password">
+<button type="submit" style="width:100%;padding:8px;">Authorize</button>
+{error}
+</form>
+</body></html>"""
+
+
+def _build_mcp() -> FastMCP:
+    public_url = os.environ.get("MCP_PUBLIC_URL")
+    if not public_url:
+        return FastMCP("garmin-mcp")
+
+    from mcp.server.auth.settings import AuthSettings, ClientRegistrationOptions, RevocationOptions
+
+    from garmin_mcp.oauth_provider import SingleUserOAuthProvider
+
+    if not os.environ.get("MCP_APP_PASSWORD"):
+        raise RuntimeError("MCP_PUBLIC_URL is set but MCP_APP_PASSWORD is not - refusing to start an open server.")
+
+    provider = SingleUserOAuthProvider()
+    auth_settings = AuthSettings(
+        issuer_url=public_url,
+        resource_server_url=public_url,
+        client_registration_options=ClientRegistrationOptions(
+            enabled=True, valid_scopes=["garmin"], default_scopes=["garmin"]
+        ),
+        revocation_options=RevocationOptions(enabled=True),
+    )
+    server = FastMCP(
+        "garmin-mcp",
+        auth_server_provider=provider,
+        auth=auth_settings,
+        host=os.environ.get("HOST", "0.0.0.0"),
+        port=int(os.environ.get("PORT", "8000")),
+    )
+    _register_auth_routes(server, provider)
+    return server
+
+
+def _register_auth_routes(server: FastMCP, provider: "SingleUserOAuthProvider") -> None:
+    @server.custom_route("/health", methods=["GET"])
+    async def health(_request: Request) -> Response:
+        return JSONResponse({"status": "ok"})
+
+    @server.custom_route("/login", methods=["GET"])
+    async def login_form(request: Request) -> Response:
+        pending = request.query_params.get("pending", "")
+        return HTMLResponse(LOGIN_PAGE.format(pending=pending, error=""))
+
+    @server.custom_route("/login", methods=["POST"])
+    async def login_submit(request: Request) -> Response:
+        form = await request.form()
+        pending = str(form.get("pending", ""))
+        password = str(form.get("password", ""))
+        redirect_url = provider.complete_login(pending, password)
+        if redirect_url is None:
+            return HTMLResponse(
+                LOGIN_PAGE.format(pending=pending, error='<p style="color:red">Incorrect password or expired link.</p>'),
+                status_code=401,
+            )
+        return RedirectResponse(redirect_url, status_code=303)
+
+
+mcp = _build_mcp()
 
 
 def _today() -> str:
@@ -117,7 +192,8 @@ def get_race_predictions() -> Any:
 
 
 def main() -> None:
-    mcp.run()
+    transport = "streamable-http" if os.environ.get("MCP_PUBLIC_URL") else "stdio"
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

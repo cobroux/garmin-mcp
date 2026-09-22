@@ -87,6 +87,57 @@ docker run --rm -i -v garmin-mcp-data:/data garmin-mcp
 }
 ```
 
+## Héberger le serveur pour l'utiliser dans claude.ai (web)
+
+Pour ajouter ce serveur comme "Custom Connector" dans claude.ai (site web,
+sans rien installer sur ta machine), il doit tourner en continu quelque part
+sur internet, avec une vraie authentification OAuth. Le serveur intègre un
+mini serveur d'autorisation OAuth 2.1 mono-utilisateur : une seule personne
+peut s'y connecter, protégée par un mot de passe d'application que tu choisis
+(`MCP_APP_PASSWORD`, différent de ton mot de passe Garmin).
+
+⚠️ Cette page de login (`/login`) est accessible publiquement — quiconque
+connaît `MCP_APP_PASSWORD` peut relier un compte claude.ai à tes données
+Garmin. Choisis un mot de passe fort et garde-le secret. Les tokens émis
+vivent en mémoire : un redéploiement/redémarrage du serveur invalide les
+connexions actives (il suffira de reconnecter le connector sur claude.ai).
+
+### Déploiement sur Railway
+
+1. Sur [railway.app](https://railway.app), crée un nouveau projet →
+   **Deploy from GitHub repo** → sélectionne `cobroux/garmin-mcp`. Railway
+   détecte le `Dockerfile` automatiquement.
+2. Dans les settings du service → **Networking** → **Generate Domain** pour
+   obtenir une URL publique, par ex.
+   `https://garmin-mcp-production-xxxx.up.railway.app`.
+3. Dans **Variables**, ajoute :
+   ```
+   GARMIN_EMAIL=ton-email@example.com
+   GARMIN_PASSWORD=ton-mot-de-passe-garmin
+   MCP_APP_PASSWORD=choisis-un-mot-de-passe-fort-different
+   MCP_PUBLIC_URL=https://garmin-mcp-production-xxxx.up.railway.app
+   ```
+   (remplace par l'URL générée à l'étape 2, sans slash final)
+4. Redéploie (Railway le fait généralement automatiquement après l'ajout de
+   variables). Vérifie que ça tourne :
+   ```bash
+   curl https://garmin-mcp-production-xxxx.up.railway.app/health
+   # {"status":"ok"}
+   ```
+5. *(Optionnel mais recommandé)* Attache un **Volume** Railway monté sur
+   `/data` pour que le token de session Garmin survive aux redémarrages du
+   service (sinon il se reconnecte simplement avec `GARMIN_EMAIL`/
+   `GARMIN_PASSWORD` à chaque cold start, ce qui reste fonctionnel).
+
+### Ajouter le connector dans claude.ai
+
+1. Sur claude.ai → **Settings** → **Connectors** → **Add custom connector**.
+2. Entre l'URL : `https://garmin-mcp-production-xxxx.up.railway.app/mcp`.
+3. claude.ai te redirige vers la page `/login` du serveur : entre le
+   `MCP_APP_PASSWORD` défini plus haut.
+4. Une fois autorisé, les outils Garmin apparaissent dans tes conversations
+   claude.ai.
+
 ## Utilisation avec Claude Desktop / Claude Code (sans Docker)
 
 Ajoute à ta config MCP (`claude_desktop_config.json` ou équivalent) :

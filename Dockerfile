@@ -12,4 +12,8 @@ RUN pip install --no-cache-dir .
 ENV GARMIN_TOKEN_STORE=/data/.garmin_mcp_tokens
 VOLUME ["/data"]
 
+# Only used when MCP_PUBLIC_URL is set (hosted HTTP mode); ignored for local
+# stdio usage. Railway/most PaaS providers inject PORT themselves.
+EXPOSE 8000
+
 ENTRYPOINT ["garmin-mcp"]
