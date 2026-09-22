@@ -1,8 +1,15 @@
-"""Thin wrapper around python-garminconnect handling auth and token caching."""
+"""Thin wrapper around python-garminconnect handling per-user auth and token caching.
+
+Each Oltre user connects their own Garmin Connect account. Credentials are
+only used once to log in; the resulting session is cached on disk under a
+per-user directory and reused on subsequent calls until it expires. The
+password itself is never persisted.
+"""
 
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from threading import Lock
 
@@ -12,9 +19,9 @@ from garminconnect import (
     GarminConnectConnectionError,
 )
 
-DEFAULT_TOKEN_STORE = Path(os.environ.get("GARMIN_TOKEN_STORE", "~/.garmin_mcp_tokens")).expanduser()
+TOKEN_STORE_ROOT = Path(os.environ.get("GARMIN_TOKEN_STORE", "~/.garmin_mcp_tokens")).expanduser()
 
-_client: Garmin | None = None
+_clients: dict[str, Garmin] = {}
 _lock = Lock()
 
 
@@ -22,34 +29,63 @@ class GarminAuthError(RuntimeError):
     pass
 
 
-def get_client() -> Garmin:
-    """Return an authenticated Garmin client, logging in and caching the session token on disk.
+def _tokenstore_path(user_id: str) -> Path:
+    return TOKEN_STORE_ROOT / user_id
 
-    Garmin.login(tokenstore_path) already handles both cases in one call: it
-    loads a cached session from tokenstore_path if present and still valid,
-    and otherwise logs in with the client's email/password and writes the
-    resulting session there - so future calls (and future runs of the
-    server) resume the session without needing the password again, until it
-    expires.
-    """
-    global _client
+
+def connect(user_id: str, email: str, password: str) -> None:
+    """Log in to Garmin Connect with the given credentials and cache the
+    resulting session for this user_id. Raises GarminAuthError on failure."""
+    path = _tokenstore_path(user_id)
+    path.mkdir(parents=True, exist_ok=True)
+
+    client = Garmin(email=email, password=password)
+    try:
+        client.login(str(path))
+    except GarminConnectAuthenticationError as exc:
+        raise GarminAuthError(f"Garmin login failed: {exc}") from exc
+    except GarminConnectConnectionError as exc:
+        raise GarminAuthError(f"Could not reach Garmin Connect: {exc}") from exc
+
     with _lock:
-        if _client is not None:
-            return _client
+        _clients[user_id] = client
 
-        email = os.environ.get("GARMIN_EMAIL")
-        password = os.environ.get("GARMIN_PASSWORD")
-        if not email or not password:
-            raise GarminAuthError("GARMIN_EMAIL and GARMIN_PASSWORD environment variables must be set.")
 
-        client = Garmin(email=email, password=password)
-        try:
-            DEFAULT_TOKEN_STORE.parent.mkdir(parents=True, exist_ok=True)
-            client.login(str(DEFAULT_TOKEN_STORE))
-        except GarminConnectAuthenticationError as exc:
-            raise GarminAuthError(f"Garmin login failed: {exc}") from exc
-        except GarminConnectConnectionError as exc:
-            raise GarminAuthError(f"Could not reach Garmin Connect: {exc}") from exc
+def get_client(user_id: str) -> Garmin:
+    """Return an authenticated Garmin client for this user_id, resuming the
+    cached session from disk if it isn't already loaded in memory.
 
-        _client = client
-        return _client
+    Raises GarminAuthError if the user never connected, or their session has
+    expired and needs reconnecting.
+    """
+    with _lock:
+        client = _clients.get(user_id)
+    if client is not None:
+        return client
+
+    path = _tokenstore_path(user_id)
+    if not path.exists():
+        raise GarminAuthError("No Garmin connection for this user. Connect a Garmin account first.")
+
+    client = Garmin()
+    try:
+        client.login(str(path))
+    except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc:
+        raise GarminAuthError(f"Garmin session expired, please reconnect your account: {exc}") from exc
+
+    with _lock:
+        _clients[user_id] = client
+    return client
+
+
+def is_connected(user_id: str) -> bool:
+    with _lock:
+        if user_id in _clients:
+            return True
+    return _tokenstore_path(user_id).exists()
+
+
+def disconnect(user_id: str) -> None:
+    with _lock:
+        _clients.pop(user_id, None)
+    shutil.rmtree(_tokenstore_path(user_id), ignore_errors=True)
