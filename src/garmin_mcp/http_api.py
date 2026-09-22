@@ -11,10 +11,11 @@ directly to the internet.
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import os
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel
 
 from garmin_mcp.garmin_client import (
@@ -25,7 +26,21 @@ from garmin_mcp.garmin_client import (
     is_connected,
 )
 
+API_TOKEN = os.environ.get("GARMIN_API_TOKEN")
+
 app = FastAPI(title="garmin-mcp REST API")
+
+
+async def require_token(x_internal_token: str | None = Header(default=None)) -> None:
+    """Every route but /health requires this shared-secret header - this API
+    manages Garmin logins and reads personal health/activity data, and is
+    meant to be called only by a trusted backend (e.g. the Oltre backend),
+    never reachable directly from end users even if the service itself is
+    deployed with a public URL (as on Railway)."""
+    if not API_TOKEN:
+        raise HTTPException(status_code=500, detail="Server misconfigured: GARMIN_API_TOKEN is not set.")
+    if not x_internal_token or not hmac.compare_digest(x_internal_token, API_TOKEN):
+        raise HTTPException(status_code=401, detail="Missing or invalid X-Internal-Token header.")
 
 
 class ConnectRequest(BaseModel):
@@ -49,7 +64,7 @@ def health() -> dict:
     return {"status": "ok"}
 
 
-@app.post("/users/{user_id}/connect")
+@app.post("/users/{user_id}/connect", dependencies=[Depends(require_token)])
 def connect_user(user_id: str, body: ConnectRequest) -> dict:
     try:
         garmin_connect(user_id, body.email, body.password)
@@ -58,18 +73,18 @@ def connect_user(user_id: str, body: ConnectRequest) -> dict:
     return {"connected": True}
 
 
-@app.get("/users/{user_id}/status")
+@app.get("/users/{user_id}/status", dependencies=[Depends(require_token)])
 def status(user_id: str) -> dict:
     return {"connected": is_connected(user_id)}
 
 
-@app.delete("/users/{user_id}/connect")
+@app.delete("/users/{user_id}/connect", dependencies=[Depends(require_token)])
 def disconnect_user(user_id: str) -> dict:
     garmin_disconnect(user_id)
     return {"connected": False}
 
 
-@app.get("/users/{user_id}/activities")
+@app.get("/users/{user_id}/activities", dependencies=[Depends(require_token)])
 def activities(user_id: str, since: str | None = None, limit: int = 50, start: int = 0) -> Any:
     """List recent activities, optionally filtered to those starting on/after
     `since` (ISO date, e.g. the Monday of a given week)."""
@@ -81,7 +96,7 @@ def activities(user_id: str, since: str | None = None, limit: int = 50, start: i
     return acts
 
 
-@app.get("/users/{user_id}/daily-summary")
+@app.get("/users/{user_id}/daily-summary", dependencies=[Depends(require_token)])
 def daily_summary(user_id: str, date: str | None = None) -> Any:
     client = _client_or_401(user_id)
     return client.get_user_summary(date or _today())

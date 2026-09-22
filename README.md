@@ -190,9 +190,11 @@ REST classique dans `garmin_mcp/http_api.py`, pensée pour être appelée par un
 backend applicatif (ex: Oltre) où **chaque utilisateur connecte son propre
 compte Garmin**.
 
-Lancer localement :
+Nécessite `GARMIN_API_TOKEN` (un secret que tu choisis, ex: `openssl rand
+-hex 32`) :
 
 ```bash
+export GARMIN_API_TOKEN=un-secret-fort-et-aleatoire
 garmin-mcp-api
 # ou : uvicorn garmin_mcp.http_api:app --host 0.0.0.0 --port 8000
 ```
@@ -201,17 +203,20 @@ C'est aussi le point d'entrée par défaut de l'image Docker (`garmin-mcp-api`).
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Vérifie que le service tourne |
+| `GET /health` | Vérifie que le service tourne (pas d'auth, pour les health checks) |
 | `POST /users/{user_id}/connect` | Body `{"email": ..., "password": ...}` — connecte le compte Garmin de cet utilisateur (mot de passe jamais stocké, seule la session est mise en cache disque) |
 | `GET /users/{user_id}/status` | `{"connected": true/false}` |
 | `DELETE /users/{user_id}/connect` | Déconnecte et supprime la session en cache |
 | `GET /users/{user_id}/activities?since=YYYY-MM-DD&limit=50` | Activités récentes, filtrées depuis une date optionnelle |
 | `GET /users/{user_id}/daily-summary?date=YYYY-MM-DD` | Résumé journalier (pas, calories, distance...) |
 
-`user_id` est un identifiant libre choisi par le service appelant (ex: l'id
-utilisateur Oltre) — ce service ne fait aucune vérification d'identité
-lui-même, il doit donc rester sur un réseau privé, jamais exposé
-directement sur internet.
+Toutes ces routes (sauf `/health`) exigent un header
+`X-Internal-Token: <GARMIN_API_TOKEN>`. `user_id` est un identifiant libre
+choisi par le service appelant (ex: l'id utilisateur Oltre) — ce service ne
+fait aucune vérification d'identité au-delà de ce token partagé, il n'est
+donc destiné à être appelé que par un backend de confiance qui connaît le
+token (ex: le backend Oltre), jamais directement par des utilisateurs
+finaux, même si le service tourne sur une URL publique (ex: Railway).
 
 ## Sécurité
 
