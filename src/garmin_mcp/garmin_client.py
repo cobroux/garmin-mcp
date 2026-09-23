@@ -55,10 +55,21 @@ def connect(user_id: str, email: str, password: str) -> None:
     client = Garmin(email=email, password=password)
     try:
         client.login(str(path))
+        # login() has been observed to return "successfully" without having
+        # actually authenticated (some of its internal login strategies
+        # silently fall through under Garmin's anti-bot challenges on
+        # datacenter IPs like Railway's) - confirm with a real authenticated
+        # call before trusting the session.
+        client.get_user_profile()
     except GarminConnectAuthenticationError as exc:
+        shutil.rmtree(path, ignore_errors=True)
         raise GarminAuthError(f"Garmin login failed: {exc}") from exc
     except GarminConnectConnectionError as exc:
+        shutil.rmtree(path, ignore_errors=True)
         raise GarminAuthError(f"Could not reach Garmin Connect: {exc}") from exc
+    except Exception as exc:
+        shutil.rmtree(path, ignore_errors=True)
+        raise GarminAuthError(f"Garmin login failed: {exc}") from exc
 
     with _lock:
         _clients[user_id] = client
