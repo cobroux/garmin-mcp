@@ -35,9 +35,22 @@ def _tokenstore_path(user_id: str) -> Path:
 
 def connect(user_id: str, email: str, password: str) -> None:
     """Log in to Garmin Connect with the given credentials and cache the
-    resulting session for this user_id. Raises GarminAuthError on failure."""
+    resulting session for this user_id. Raises GarminAuthError on failure.
+
+    Garmin.login(tokenstore) resumes a still-valid cached session from disk
+    before it ever checks email/password - fine for the single-account MCP
+    use case, but wrong here: this is the "verify and link this Garmin
+    account" endpoint, so it must not let stale credentials silently pass
+    just because *some* session (possibly logged in with different, older
+    credentials) still happens to be cached for this user_id. Clear any
+    existing session first to force a real credential check every time.
+    """
     path = _tokenstore_path(user_id)
+    shutil.rmtree(path, ignore_errors=True)
     path.mkdir(parents=True, exist_ok=True)
+
+    with _lock:
+        _clients.pop(user_id, None)
 
     client = Garmin(email=email, password=password)
     try:
