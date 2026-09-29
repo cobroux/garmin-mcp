@@ -57,6 +57,21 @@ docker run --rm -i \
   garmin-mcp
 ```
 
+> **PowerShell (Windows)** : `\` n'est pas un caractère de continuation de
+> ligne comme en bash (chaque ligne serait exécutée séparément). Utilise le
+> backtick `` ` `` à la place, ou mets la commande sur une seule ligne. Si ton
+> mot de passe contient un `$` (ex. `$xBlackStar!21.`), utilise des guillemets
+> **simples** `'...'` pour éviter que PowerShell l'interprète comme une
+> variable :
+>
+> ```powershell
+> docker run --rm -i `
+>   -e GARMIN_EMAIL="ton-email@example.com" `
+>   -e GARMIN_PASSWORD='ton-mot-de-passe' `
+>   -v garmin-mcp-data:/data `
+>   garmin-mcp
+> ```
+
 Une fois le token mis en cache dans le volume, tu peux relancer sans les
 variables d'environnement :
 
