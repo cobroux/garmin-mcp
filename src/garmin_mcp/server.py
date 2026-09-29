@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime as dt
+import hmac
 import os
 from typing import Any
 
@@ -10,7 +11,13 @@ from mcp.server.fastmcp import FastMCP
 from starlette.requests import Request
 from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from garmin_mcp.garmin_client import GarminAuthError, connect, get_client, is_connected
+from garmin_mcp.garmin_client import (
+    GarminAuthError,
+    connect,
+    disconnect,
+    get_client,
+    is_connected,
+)
 
 # The MCP server (stdio/Claude Desktop use case) stays single-account, driven
 # by GARMIN_EMAIL/GARMIN_PASSWORD env vars, unlike the multi-user REST API in
@@ -62,6 +69,8 @@ def _build_mcp() -> FastMCP:
         port=int(os.environ.get("PORT", "8000")),
     )
     _register_auth_routes(server, provider)
+    if os.environ.get("GARMIN_API_TOKEN"):
+        _register_rest_routes(server)
     return server
 
 
@@ -87,6 +96,84 @@ def _register_auth_routes(server: FastMCP, provider: "SingleUserOAuthProvider") 
                 status_code=401,
             )
         return RedirectResponse(redirect_url, status_code=303)
+
+
+def _require_api_token(request: Request) -> Response | None:
+    """Returns a 401 Response if the shared-secret header is missing/wrong, else None."""
+    token = os.environ.get("GARMIN_API_TOKEN", "")
+    header = request.headers.get("x-internal-token", "")
+    if not header or not hmac.compare_digest(header, token):
+        return JSONResponse({"detail": "Missing or invalid X-Internal-Token header."}, status_code=401)
+    return None
+
+
+def _register_rest_routes(server: FastMCP) -> None:
+    """Multi-user REST API (used by services like the Oltre backend) mounted
+    on the same server/port as the MCP endpoint and OAuth routes above.
+
+    Every route here (this is a REST app, not MCP tools) requires the
+    X-Internal-Token header - unlike the MCP tools, which are gated by the
+    OAuth flow above, these routes take a free-form `user_id` with no
+    identity check beyond that shared secret, so this must only be called by
+    a trusted backend (e.g. Oltre), never directly by end users.
+    """
+
+    @server.custom_route("/users/{user_id}/connect", methods=["POST"])
+    async def rest_connect(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        body = await request.json()
+        try:
+            connect(user_id, body["email"], body["password"])
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
+        return JSONResponse({"connected": True})
+
+    @server.custom_route("/users/{user_id}/status", methods=["GET"])
+    async def rest_status(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        return JSONResponse({"connected": is_connected(user_id)})
+
+    @server.custom_route("/users/{user_id}/connect", methods=["DELETE"])
+    async def rest_disconnect(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        disconnect(user_id)
+        return JSONResponse({"connected": False})
+
+    @server.custom_route("/users/{user_id}/activities", methods=["GET"])
+    async def rest_activities(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        try:
+            client = get_client(user_id)
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
+        limit = int(request.query_params.get("limit", "50"))
+        start = int(request.query_params.get("start", "0"))
+        since = request.query_params.get("since")
+        acts = client.get_activities(start, limit)
+        if since:
+            cutoff = dt.date.fromisoformat(since)
+            acts = [a for a in acts if dt.date.fromisoformat(a["startTimeLocal"][:10]) >= cutoff]
+        return JSONResponse(acts)
+
+    @server.custom_route("/users/{user_id}/daily-summary", methods=["GET"])
+    async def rest_daily_summary(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        try:
+            client = get_client(user_id)
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
+        date = request.query_params.get("date") or _today()
+        return JSONResponse(client.get_user_summary(date))
 
 
 mcp = _build_mcp()

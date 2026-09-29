@@ -102,13 +102,15 @@ Garmin. Choisis un mot de passe fort et garde-le secret. Les tokens émis
 vivent en mémoire : un redéploiement/redémarrage du serveur invalide les
 connexions actives (il suffira de reconnecter le connector sur claude.ai).
 
-⚠️ **Ce mode (MCP + OAuth pour claude.ai) et l'[API REST multi-utilisateur](#api-rest-multi-utilisateur-pour-un-backend-applicatif)
-pour Oltre ne peuvent PAS tourner sur le même service Railway.** Ce sont deux
-applications différentes (`garmin-mcp` vs `garmin-mcp-api`) qui écoutent sur
-le même chemin `/`-relatif mais avec des routes incompatibles — si le service
-lance l'API REST, `claude.ai` reçoit un 404 en essayant de parler MCP sur
-`/mcp`, et vice-versa. Il faut **deux services Railway séparés** à partir du
-même repo (voir juste en dessous).
+Ce mode (MCP + OAuth pour claude.ai) et l'[API REST multi-utilisateur](#api-rest-multi-utilisateur-pour-un-backend-applicatif)
+pour Oltre tournaient à l'origine sur deux applications séparées
+(`garmin-mcp` vs `garmin-mcp-api`), donc soit sur deux services Railway
+différents, soit un seul service ne pouvait servir que l'une des deux (l'autre
+recevait un 404). **Elles peuvent désormais tourner ensemble sur un seul
+service** : dès que `GARMIN_API_TOKEN` est défini en plus des variables MCP
+ci-dessous, le serveur MCP+OAuth expose aussi les routes REST `/users/...`
+sur le même port — voir la commande `garmin-mcp` (pas `garmin-mcp-api`) plus
+bas. C'est l'option recommandée pour un déploiement simple à un seul service.
 
 ### Déploiement sur Railway
 
@@ -117,8 +119,9 @@ même repo (voir juste en dessous).
    détecte le `Dockerfile` automatiquement.
 2. Dans les settings du service → **Deploy** → **Custom Start Command**,
    mets `garmin-mcp` (par défaut l'image lance `garmin-mcp-api`, l'API REST
-   pour Oltre — voir l'avertissement ci-dessus). C'est ce qui fait de ce
-   service le serveur **MCP pour claude.ai**, distinct de celui d'Oltre.
+   seule sans OAuth/claude.ai). C'est ce qui active le serveur MCP+OAuth —
+   les routes REST se greffent dessus automatiquement si `GARMIN_API_TOKEN`
+   est défini (étape 4).
 3. Dans les settings du service → **Networking** → **Generate Domain** pour
    obtenir une URL publique, par ex.
    `https://garmin-mcp-production-xxxx.up.railway.app`.
@@ -128,8 +131,11 @@ même repo (voir juste en dessous).
    GARMIN_PASSWORD=ton-mot-de-passe-garmin
    MCP_APP_PASSWORD=choisis-un-mot-de-passe-fort-different
    MCP_PUBLIC_URL=https://garmin-mcp-production-xxxx.up.railway.app
+   GARMIN_API_TOKEN=un-secret-fort-et-aleatoire
    ```
-   (remplace par l'URL générée à l'étape 3, sans slash final)
+   (remplace `MCP_PUBLIC_URL` par l'URL générée à l'étape 3, sans slash
+   final ; omets `GARMIN_API_TOKEN` si tu n'as pas besoin de l'API REST pour
+   Oltre sur ce service)
 5. Redéploie (Railway le fait généralement automatiquement après l'ajout de
    variables). Vérifie que ça tourne :
    ```bash
@@ -141,10 +147,11 @@ même repo (voir juste en dessous).
    service (sinon il se reconnecte simplement avec `GARMIN_EMAIL`/
    `GARMIN_PASSWORD` à chaque cold start, ce qui reste fonctionnel).
 
-Le service existant qui sert l'API REST pour Oltre reste inchangé : il garde
-son **Custom Start Command** vide (ou `garmin-mcp-api`, la valeur par
-défaut) et ses propres variables (`GARMIN_API_TOKEN`, etc.) — c'est un
-déploiement séparé du même repo, avec sa propre URL Railway.
+Si tu préfères garder deux services séparés (par ex. pour isoler les deux
+usages, ou parce que l'un des deux existe déjà en prod), c'est toujours
+possible : un second service sur ce même repo, avec un **Custom Start
+Command** vide (donc `garmin-mcp-api`), ses propres variables
+(`GARMIN_API_TOKEN`, etc.) et sa propre URL Railway.
 
 ### Ajouter le connector dans claude.ai
 
@@ -217,6 +224,14 @@ garmin-mcp-api
 ```
 
 C'est aussi le point d'entrée par défaut de l'image Docker (`garmin-mcp-api`).
+
+**Sur le même service que le serveur MCP/claude.ai** : si tu fais tourner
+`garmin-mcp` (pas `garmin-mcp-api`) en mode hébergé (`MCP_PUBLIC_URL` défini)
+et que tu ajoutes aussi `GARMIN_API_TOKEN`, ces mêmes routes REST sont
+automatiquement montées sur ce serveur, sur le même port — pas besoin d'un
+service séparé. C'est l'option recommandée pour un déploiement à un seul
+service (voir "Héberger le serveur pour l'utiliser dans claude.ai" plus
+haut).
 
 | Endpoint | Description |
 |---|---|
