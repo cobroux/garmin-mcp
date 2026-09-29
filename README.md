@@ -102,32 +102,49 @@ Garmin. Choisis un mot de passe fort et garde-le secret. Les tokens émis
 vivent en mémoire : un redéploiement/redémarrage du serveur invalide les
 connexions actives (il suffira de reconnecter le connector sur claude.ai).
 
+⚠️ **Ce mode (MCP + OAuth pour claude.ai) et l'[API REST multi-utilisateur](#api-rest-multi-utilisateur-pour-un-backend-applicatif)
+pour Oltre ne peuvent PAS tourner sur le même service Railway.** Ce sont deux
+applications différentes (`garmin-mcp` vs `garmin-mcp-api`) qui écoutent sur
+le même chemin `/`-relatif mais avec des routes incompatibles — si le service
+lance l'API REST, `claude.ai` reçoit un 404 en essayant de parler MCP sur
+`/mcp`, et vice-versa. Il faut **deux services Railway séparés** à partir du
+même repo (voir juste en dessous).
+
 ### Déploiement sur Railway
 
 1. Sur [railway.app](https://railway.app), crée un nouveau projet →
    **Deploy from GitHub repo** → sélectionne `cobroux/garmin-mcp`. Railway
    détecte le `Dockerfile` automatiquement.
-2. Dans les settings du service → **Networking** → **Generate Domain** pour
+2. Dans les settings du service → **Deploy** → **Custom Start Command**,
+   mets `garmin-mcp` (par défaut l'image lance `garmin-mcp-api`, l'API REST
+   pour Oltre — voir l'avertissement ci-dessus). C'est ce qui fait de ce
+   service le serveur **MCP pour claude.ai**, distinct de celui d'Oltre.
+3. Dans les settings du service → **Networking** → **Generate Domain** pour
    obtenir une URL publique, par ex.
    `https://garmin-mcp-production-xxxx.up.railway.app`.
-3. Dans **Variables**, ajoute :
+4. Dans **Variables**, ajoute :
    ```
    GARMIN_EMAIL=ton-email@example.com
    GARMIN_PASSWORD=ton-mot-de-passe-garmin
    MCP_APP_PASSWORD=choisis-un-mot-de-passe-fort-different
    MCP_PUBLIC_URL=https://garmin-mcp-production-xxxx.up.railway.app
    ```
-   (remplace par l'URL générée à l'étape 2, sans slash final)
-4. Redéploie (Railway le fait généralement automatiquement après l'ajout de
+   (remplace par l'URL générée à l'étape 3, sans slash final)
+5. Redéploie (Railway le fait généralement automatiquement après l'ajout de
    variables). Vérifie que ça tourne :
    ```bash
    curl https://garmin-mcp-production-xxxx.up.railway.app/health
    # {"status":"ok"}
    ```
-5. *(Optionnel mais recommandé)* Attache un **Volume** Railway monté sur
+6. *(Optionnel mais recommandé)* Attache un **Volume** Railway monté sur
    `/data` pour que le token de session Garmin survive aux redémarrages du
    service (sinon il se reconnecte simplement avec `GARMIN_EMAIL`/
    `GARMIN_PASSWORD` à chaque cold start, ce qui reste fonctionnel).
+
+Le service existant qui sert l'API REST pour Oltre reste inchangé : il garde
+son **Custom Start Command** vide (ou `garmin-mcp-api`, la valeur par
+défaut) et ses propres variables (`GARMIN_API_TOKEN`, etc.) — c'est un
+déploiement séparé du même repo, avec sa propre URL Railway.
 
 ### Ajouter le connector dans claude.ai
 

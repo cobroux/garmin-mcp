@@ -17,6 +17,9 @@ ENV GARMIN_TOKEN_STORE=/data/.garmin_mcp_tokens
 EXPOSE 8000
 
 # REST API (multi-user, used by services like the Oltre backend) by default.
-# Override with `--entrypoint garmin-mcp` to run the MCP stdio/HTTP server
-# instead (single account via GARMIN_EMAIL/GARMIN_PASSWORD).
-ENTRYPOINT ["garmin-mcp-api"]
+# This is a CMD, not an ENTRYPOINT, on purpose: a platform "custom start
+# command" (e.g. Railway) replaces CMD but only appends to an ENTRYPOINT, so
+# a second deployment of this same image can run the single-account MCP
+# server instead (for the claude.ai connector) by overriding the start
+# command to `garmin-mcp` - see README "Deux services distincts sur Railway".
+CMD ["garmin-mcp-api"]
