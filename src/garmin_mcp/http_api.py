@@ -28,7 +28,11 @@ from garmin_mcp.garmin_client import (
 
 API_TOKEN = os.environ.get("GARMIN_API_TOKEN")
 
-app = FastAPI(title="garmin-mcp REST API")
+# No public API docs/schema - this service is meant to sit on a private
+# network, only ever called by a trusted backend that already knows its
+# shape; exposing /docs and /openapi.json to the internet on a public
+# Railway URL is unnecessary information disclosure.
+app = FastAPI(title="garmin-mcp REST API", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 async def require_token(x_internal_token: str | None = Header(default=None)) -> None:
