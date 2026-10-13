@@ -13,6 +13,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from garmin_mcp.garmin_client import (
     GarminAuthError,
+    build_activity_details,
     connect,
     disconnect,
     get_client,
@@ -174,6 +175,18 @@ def _register_rest_routes(server: FastMCP) -> None:
             return JSONResponse({"detail": str(exc)}, status_code=401)
         date = request.query_params.get("date") or _today()
         return JSONResponse(client.get_user_summary(date))
+
+    @server.custom_route("/users/{user_id}/activities/{activity_id}/details", methods=["GET"])
+    async def rest_activity_details(request: Request) -> Response:
+        if denied := _require_api_token(request):
+            return denied
+        user_id = request.path_params["user_id"]
+        activity_id = request.path_params["activity_id"]
+        try:
+            client = get_client(user_id)
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
+        return JSONResponse(build_activity_details(client, activity_id))
 
 
 mcp = _build_mcp()

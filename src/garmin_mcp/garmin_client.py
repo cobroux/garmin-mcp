@@ -113,3 +113,86 @@ def disconnect(user_id: str) -> None:
     with _lock:
         _clients.pop(user_id, None)
     shutil.rmtree(_tokenstore_path(user_id), ignore_errors=True)
+
+
+def build_activity_details(client: Garmin, activity_id: str) -> dict:
+    """Normalized detail payload for one activity: summary stats, a GPS
+    polyline (GPS-tracked activities only), per-lap splits, and strength
+    exercise sets (strength activities only). Each piece is fetched and
+    parsed independently and best-effort - most activity types don't have
+    all of them, and a missing/unexpected shape on one must not take down
+    the rest of the response.
+
+    Shared by the REST API exposed in http_api.py and the duplicate REST
+    routes mounted on the MCP server in server.py (the two services Railway
+    actually deploys this project as) so they can't drift out of sync again.
+    """
+    try:
+        summary = client.get_activity(activity_id)
+    except Exception:
+        summary = {}
+
+    polyline = None
+    try:
+        details = client.get_activity_details(activity_id, maxpoly=2000)
+        points = (details.get("geoPolylineDTO") or {}).get("polyline") or []
+        parsed = [
+            {"lat": p["lat"], "lon": p["lon"]}
+            for p in points
+            if p.get("lat") is not None and p.get("lon") is not None
+        ]
+        polyline = parsed or None
+    except Exception:
+        polyline = None
+
+    splits: list[dict] = []
+    try:
+        splits_raw = client.get_activity_splits(activity_id)
+        for lap in splits_raw.get("lapDTOs", []):
+            splits.append({
+                "distance": lap.get("distance"),
+                "duration": lap.get("duration"),
+                "elevationGain": lap.get("elevationGain"),
+                "averageSpeed": lap.get("averageSpeed"),
+                "averageHR": lap.get("averageHR"),
+            })
+    except Exception:
+        splits = []
+
+    exercise_sets: list[dict] = []
+    try:
+        sets_raw = client.get_activity_exercise_sets(activity_id)
+        for s in sets_raw.get("exerciseSets", []):
+            if s.get("setType") != "ACTIVE":
+                continue
+            exercises = s.get("exercises") or []
+            name = exercises[0].get("name") if exercises else None
+            weight = s.get("weight")
+            exercise_sets.append({
+                "name": name,
+                "reps": s.get("repetitionCount"),
+                "weightKg": (weight / 1000.0) if weight else None,
+                "duration": s.get("duration"),
+            })
+    except Exception:
+        exercise_sets = []
+
+    activity_type = summary.get("activityType") or {}
+    return {
+        "activityId": summary.get("activityId", activity_id),
+        "name": summary.get("activityName"),
+        "sportType": activity_type.get("typeKey"),
+        "startLocal": summary.get("startTimeLocal"),
+        "distance": summary.get("distance"),
+        "duration": summary.get("duration"),
+        "elevationGain": summary.get("elevationGain"),
+        "elevationLoss": summary.get("elevationLoss"),
+        "calories": summary.get("calories"),
+        "averageHR": summary.get("averageHR"),
+        "maxHR": summary.get("maxHR"),
+        "averageSpeed": summary.get("averageSpeed"),
+        "maxSpeed": summary.get("maxSpeed"),
+        "polyline": polyline,
+        "splits": splits,
+        "exerciseSets": exercise_sets,
+    }
