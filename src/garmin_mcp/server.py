@@ -103,11 +103,14 @@ def _register_auth_routes(server: FastMCP, provider: "SingleUserOAuthProvider") 
 
 
 def _require_api_token(request: Request) -> Response | None:
-    """Returns a 401 Response if the shared-secret header is missing/wrong, else None."""
+    """Returns a 401 Response if the shared-secret header is missing/wrong, 404 if the
+    path targets the MCP's own account (_MCP_USER_ID), else None."""
     token = os.environ.get("GARMIN_API_TOKEN", "")
     header = request.headers.get("x-internal-token", "")
     if not header or not hmac.compare_digest(header, token):
         return JSONResponse({"detail": "Missing or invalid X-Internal-Token header."}, status_code=401)
+    if request.path_params.get("user_id") == _MCP_USER_ID:
+        return JSONResponse({"detail": "Not found."}, status_code=404)
     return None
 
 
@@ -127,9 +130,13 @@ def _register_rest_routes(server: FastMCP) -> None:
         if denied := _require_api_token(request):
             return denied
         user_id = request.path_params["user_id"]
-        body = await request.json()
         try:
-            connect(user_id, body["email"], body["password"])
+            body = await request.json()
+            email, password = body["email"], body["password"]
+        except (ValueError, KeyError, TypeError):
+            return JSONResponse({"detail": "Invalid request body."}, status_code=400)
+        try:
+            connect(user_id, email, password)
         except GarminAuthError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=401)
         return JSONResponse({"connected": True})
@@ -164,12 +171,15 @@ def _register_rest_routes(server: FastMCP) -> None:
             client = get_client(user_id)
         except GarminAuthError as exc:
             return JSONResponse({"detail": str(exc)}, status_code=401)
-        limit = int(request.query_params.get("limit", "50"))
-        start = int(request.query_params.get("start", "0"))
         since = request.query_params.get("since")
+        try:
+            limit = min(max(int(request.query_params.get("limit", "50")), 1), 200)
+            start = max(int(request.query_params.get("start", "0")), 0)
+            cutoff = dt.date.fromisoformat(since) if since else None
+        except ValueError:
+            return JSONResponse({"detail": "Invalid query parameter."}, status_code=400)
         acts = client.get_activities(start, limit)
-        if since:
-            cutoff = dt.date.fromisoformat(since)
+        if cutoff:
             acts = [a for a in acts if dt.date.fromisoformat(a["startTimeLocal"][:10]) >= cutoff]
         return JSONResponse(acts)
 
@@ -191,6 +201,8 @@ def _register_rest_routes(server: FastMCP) -> None:
             return denied
         user_id = request.path_params["user_id"]
         activity_id = request.path_params["activity_id"]
+        if not activity_id.isdigit():
+            return JSONResponse({"detail": "activity_id must be numeric."}, status_code=400)
         try:
             client = get_client(user_id)
         except GarminAuthError as exc:
@@ -233,13 +245,15 @@ def get_activities(limit: int = 10, start: int = 0) -> Any:
         limit: max number of activities to return.
         start: offset for pagination.
     """
-    return _call("get_activities", start, limit)
+    return _call("get_activities", max(start, 0), min(max(limit, 1), 200))
 
 
 @mcp.tool()
 def get_activity_details(activity_id: str) -> Any:
     """Get full details for a single activity by its Garmin activity id
     (as returned by get_activities)."""
+    if not activity_id.isdigit():
+        raise ValueError("activity_id must be numeric.")
     return _call("get_activity", activity_id)
 
 

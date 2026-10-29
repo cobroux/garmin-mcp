@@ -8,6 +8,7 @@ password itself is never persisted.
 
 from __future__ import annotations
 
+import logging
 import os
 import re
 import shutil
@@ -21,6 +22,8 @@ from garminconnect import (
 )
 
 TOKEN_STORE_ROOT = Path(os.environ.get("GARMIN_TOKEN_STORE", "~/.garmin_mcp_tokens")).expanduser()
+
+logger = logging.getLogger(__name__)
 
 _clients: dict[str, Garmin] = {}
 _lock = Lock()
@@ -50,7 +53,7 @@ def connect(user_id: str, email: str, password: str) -> None:
     """
     path = _tokenstore_path(user_id)
     shutil.rmtree(path, ignore_errors=True)
-    path.mkdir(parents=True, exist_ok=True)
+    path.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     with _lock:
         _clients.pop(user_id, None)
@@ -66,13 +69,16 @@ def connect(user_id: str, email: str, password: str) -> None:
         client.get_user_profile()
     except GarminConnectAuthenticationError as exc:
         shutil.rmtree(path, ignore_errors=True)
-        raise GarminAuthError(f"Garmin login failed: {exc}") from exc
+        logger.warning("Garmin login failed: %s", exc)
+        raise GarminAuthError("Garmin login failed.") from exc
     except GarminConnectConnectionError as exc:
         shutil.rmtree(path, ignore_errors=True)
-        raise GarminAuthError(f"Could not reach Garmin Connect: {exc}") from exc
+        logger.warning("Garmin connection error: %s", exc)
+        raise GarminAuthError("Could not reach Garmin Connect.") from exc
     except Exception as exc:
         shutil.rmtree(path, ignore_errors=True)
-        raise GarminAuthError(f"Garmin login failed: {exc}") from exc
+        logger.warning("Garmin login error: %s", exc)
+        raise GarminAuthError("Garmin login failed.") from exc
 
     with _lock:
         _clients[user_id] = client
@@ -98,7 +104,8 @@ def get_client(user_id: str) -> Garmin:
     try:
         client.login(str(path))
     except (GarminConnectAuthenticationError, GarminConnectConnectionError) as exc:
-        raise GarminAuthError(f"Garmin session expired, please reconnect your account: {exc}") from exc
+        logger.warning("Garmin session resume failed: %s", exc)
+        raise GarminAuthError("Garmin session expired, please reconnect your account.") from exc
 
     with _lock:
         _clients[user_id] = client
