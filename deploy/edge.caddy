@@ -1,0 +1,13 @@
+# Routage garmin-mcp sur la VM Oracle partagée (source de vérité).
+# Copié dans /opt/edge/caddy/sites/garmin-mcp.caddy, puis :
+#   docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile
+garmin.88-96-45-97.sslip.io {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+
+	reverse_proxy garmin-mcp:8000
+}

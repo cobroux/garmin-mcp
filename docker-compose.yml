@@ -1,0 +1,26 @@
+# Deployment on the shared Oracle VM: MCP server + REST API on one service,
+# reachable only through the shared edge-caddy proxy (deploy/edge.caddy), which
+# terminates HTTPS. Needs a .env next to this file with MCP_PUBLIC_URL,
+# MCP_APP_PASSWORD, GARMIN_API_TOKEN (+ GARMIN_EMAIL / GARMIN_PASSWORD).
+#
+#   docker compose up -d --build
+services:
+  garmin-mcp:
+    build: .
+    container_name: garmin-mcp
+    command: garmin-mcp
+    env_file: .env
+    volumes:
+      - garmin_data:/data
+    restart: unless-stopped
+
+networks:
+  # The network edge-caddy is attached to, so it can reach garmin-mcp:8000.
+  default:
+    name: ${EDGE_NETWORK:-edge}
+    external: true
+
+volumes:
+  # Named volume, not a bind mount: Docker seeds it with the image's /data
+  # ownership, so the non-root `app` user can write the token store.
+  garmin_data:
