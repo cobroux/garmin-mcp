@@ -19,6 +19,7 @@ from mcp.server.auth.provider import (
     AccessToken,
     AuthorizationCode,
     AuthorizationParams,
+    RegistrationError,
     OAuthAuthorizationServerProvider,
     OAuthClientInformationFull,
     OAuthToken,
@@ -28,6 +29,7 @@ from mcp.server.auth.provider import (
 
 ACCESS_TOKEN_TTL_SECONDS = 3600
 PENDING_LOGIN_TTL_SECONDS = 300
+ALLOWED_REDIRECT_PREFIXES = ("https://claude.ai/", "https://claude.com/")
 AUTH_CODE_TTL_SECONDS = 300
 OWNER_SUBJECT = "owner"
 
@@ -55,6 +57,9 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider):
         return self._clients.get(client_id)
 
     async def register_client(self, client_info: OAuthClientInformationFull) -> None:
+        for uri in client_info.redirect_uris or []:
+            if not str(uri).startswith(ALLOWED_REDIRECT_PREFIXES):
+                raise RegistrationError("invalid_redirect_uri", "redirect_uri not allowed")
         self._clients[client_info.client_id] = client_info
 
     # -- authorization: hand off to our own /login page instead of a 3rd party --
@@ -80,6 +85,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider):
             return None
         expected = os.environ.get("MCP_APP_PASSWORD", "")
         if not expected or not secrets.compare_digest(password, expected):
+            del self._pending[pending_id]  # one attempt per link
             return None
         del self._pending[pending_id]
 

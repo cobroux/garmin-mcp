@@ -64,6 +64,13 @@ def _client_or_401(user_id: str) -> Any:
         raise HTTPException(status_code=401, detail=str(exc)) from exc
 
 
+def _or_401(fn, *args) -> Any:
+    try:
+        return fn(*args)
+    except GarminAuthError as exc:
+        raise HTTPException(status_code=401, detail=str(exc)) from exc
+
+
 @app.get("/health")
 def health() -> dict:
     return {"status": "ok"}
@@ -80,12 +87,12 @@ def connect_user(user_id: str, body: ConnectRequest) -> dict:
 
 @app.get("/users/{user_id}/status", dependencies=[Depends(require_token)])
 def status(user_id: str) -> dict:
-    return {"connected": is_connected(user_id)}
+    return {"connected": _or_401(is_connected, user_id)}
 
 
 @app.delete("/users/{user_id}/connect", dependencies=[Depends(require_token)])
 def disconnect_user(user_id: str) -> dict:
-    garmin_disconnect(user_id)
+    _or_401(garmin_disconnect, user_id)
     return {"connected": False}
 
 

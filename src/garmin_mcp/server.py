@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import datetime as dt
+import asyncio
 import hmac
+import html
 import os
 from typing import Any
 
@@ -83,7 +85,7 @@ def _register_auth_routes(server: FastMCP, provider: "SingleUserOAuthProvider") 
     @server.custom_route("/login", methods=["GET"])
     async def login_form(request: Request) -> Response:
         pending = request.query_params.get("pending", "")
-        return HTMLResponse(LOGIN_PAGE.format(pending=pending, error=""))
+        return HTMLResponse(LOGIN_PAGE.format(pending=html.escape(pending, quote=True), error=""))
 
     @server.custom_route("/login", methods=["POST"])
     async def login_submit(request: Request) -> Response:
@@ -92,8 +94,9 @@ def _register_auth_routes(server: FastMCP, provider: "SingleUserOAuthProvider") 
         password = str(form.get("password", ""))
         redirect_url = provider.complete_login(pending, password)
         if redirect_url is None:
+            await asyncio.sleep(1)
             return HTMLResponse(
-                LOGIN_PAGE.format(pending=pending, error='<p style="color:red">Incorrect password or expired link.</p>'),
+                LOGIN_PAGE.format(pending=html.escape(pending, quote=True), error='<p style="color:red">Incorrect password or expired link.</p>'),
                 status_code=401,
             )
         return RedirectResponse(redirect_url, status_code=303)
@@ -136,14 +139,20 @@ def _register_rest_routes(server: FastMCP) -> None:
         if denied := _require_api_token(request):
             return denied
         user_id = request.path_params["user_id"]
-        return JSONResponse({"connected": is_connected(user_id)})
+        try:
+            return JSONResponse({"connected": is_connected(user_id)})
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
 
     @server.custom_route("/users/{user_id}/connect", methods=["DELETE"])
     async def rest_disconnect(request: Request) -> Response:
         if denied := _require_api_token(request):
             return denied
         user_id = request.path_params["user_id"]
-        disconnect(user_id)
+        try:
+            disconnect(user_id)
+        except GarminAuthError as exc:
+            return JSONResponse({"detail": str(exc)}, status_code=401)
         return JSONResponse({"connected": False})
 
     @server.custom_route("/users/{user_id}/activities", methods=["GET"])
