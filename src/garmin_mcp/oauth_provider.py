@@ -31,6 +31,8 @@ ACCESS_TOKEN_TTL_SECONDS = 3600
 PENDING_LOGIN_TTL_SECONDS = 300
 ALLOWED_REDIRECT_PREFIXES = ("https://claude.ai/", "https://claude.com/")
 AUTH_CODE_TTL_SECONDS = 300
+REFRESH_TOKEN_TTL_SECONDS = 30 * 86400
+MAX_CLIENTS = 100
 OWNER_SUBJECT = "owner"
 
 
@@ -60,11 +62,18 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider):
         for uri in client_info.redirect_uris or []:
             if not str(uri).startswith(ALLOWED_REDIRECT_PREFIXES):
                 raise RegistrationError("invalid_redirect_uri", "redirect_uri not allowed")
+        if client_info.client_id not in self._clients and len(self._clients) >= MAX_CLIENTS:
+            raise RegistrationError("invalid_client_metadata", "too many registered clients")
         self._clients[client_info.client_id] = client_info
 
     # -- authorization: hand off to our own /login page instead of a 3rd party --
 
     async def authorize(self, client: OAuthClientInformationFull, params: AuthorizationParams) -> str:
+        now = time.time()
+        for k in [k for k, v in self._pending.items() if v.expires_at < now]:
+            del self._pending[k]
+        for k in [k for k, v in self._auth_codes.items() if v.expires_at < now]:
+            del self._auth_codes[k]
         pending_id = secrets.token_urlsafe(24)
         self._pending[pending_id] = _PendingAuthorization(
             client_id=client.client_id,
@@ -124,6 +133,9 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider):
         token = self._refresh_tokens.get(refresh_token)
         if token is None or token.client_id != client.client_id:
             return None
+        if token.expires_at is not None and token.expires_at < time.time():
+            del self._refresh_tokens[refresh_token]
+            return None
         return token
 
     async def exchange_refresh_token(
@@ -168,6 +180,7 @@ class SingleUserOAuthProvider(OAuthAuthorizationServerProvider):
             token=refresh_token,
             client_id=client_id,
             scopes=scopes,
+            expires_at=int(time.time()) + REFRESH_TOKEN_TTL_SECONDS,
             resource=resource,
             subject=OWNER_SUBJECT,
         )

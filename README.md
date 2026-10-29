@@ -112,7 +112,24 @@ ci-dessous, le serveur MCP+OAuth expose aussi les routes REST `/users/...`
 sur le même port — voir la commande `garmin-mcp` (pas `garmin-mcp-api`) plus
 bas. C'est l'option recommandée pour un déploiement simple à un seul service.
 
-### Déploiement sur Railway
+### Déploiement sur la VM Oracle (production)
+
+Le service tourne sur la VM Oracle partagée, derrière le proxy `edge-caddy`
+(réseau Docker `edge`), comme Oltre :
+
+```bash
+git clone https://github.com/cobroux/garmin-mcp.git /opt/garmin-mcp && cd /opt/garmin-mcp
+cp .env.example .env   # MCP_PUBLIC_URL=https://garmin.88-96-45-97.sslip.io, MCP_APP_PASSWORD, GARMIN_API_TOKEN, GARMIN_EMAIL/PASSWORD
+docker compose up -d --build
+sudo cp deploy/edge.caddy /opt/edge/caddy/sites/garmin-mcp.caddy
+docker exec edge-caddy caddy reload --config /etc/caddy/Caddyfile
+curl https://garmin.88-96-45-97.sslip.io/health
+```
+
+Oltre (sur le même réseau `edge`) peut appeler l'API en interne :
+`GARMIN_SERVICE_URL=http://garmin-mcp:8000`. Mise à jour : `git pull && docker compose up -d --build`.
+
+### Déploiement sur Railway (ancien)
 
 1. Sur [railway.app](https://railway.app), crée un nouveau projet →
    **Deploy from GitHub repo** → sélectionne `cobroux/garmin-mcp`. Railway

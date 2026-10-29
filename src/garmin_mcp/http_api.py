@@ -15,7 +15,7 @@ import hmac
 import os
 from typing import Any
 
-from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 from pydantic import BaseModel
 
 from garmin_mcp.garmin_client import (
@@ -97,7 +97,7 @@ def disconnect_user(user_id: str) -> dict:
 
 
 @app.get("/users/{user_id}/activities", dependencies=[Depends(require_token)])
-def activities(user_id: str, since: str | None = None, limit: int = 50, start: int = 0) -> Any:
+def activities(user_id: str, since: str | None = None, limit: int = Query(50, ge=1, le=200), start: int = Query(0, ge=0)) -> Any:
     """List recent activities, optionally filtered to those starting on/after
     `since` (ISO date, e.g. the Monday of a given week)."""
     client = _client_or_401(user_id)
@@ -116,6 +116,8 @@ def daily_summary(user_id: str, date: str | None = None) -> Any:
 
 @app.get("/users/{user_id}/activities/{activity_id}/details", dependencies=[Depends(require_token)])
 def activity_details(user_id: str, activity_id: str) -> Any:
+    if not activity_id.isdigit():
+        raise HTTPException(status_code=400, detail="activity_id must be numeric.")
     client = _client_or_401(user_id)
     return build_activity_details(client, activity_id)
 

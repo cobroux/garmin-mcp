@@ -7,6 +7,9 @@ COPY src ./src
 
 RUN pip install --no-cache-dir .
 
+RUN useradd --system --create-home app && mkdir -p /data && chown app /data
+USER app
+
 # Per-user session token cache, so a re-run doesn't need each user to
 # reconnect, as long as a volume is mounted at /data (e.g.
 # `docker run -v ...:/data`, or a Railway Volume attached at /data -
