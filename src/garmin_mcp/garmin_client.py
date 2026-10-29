@@ -9,6 +9,7 @@ password itself is never persisted.
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from pathlib import Path
 from threading import Lock
@@ -30,6 +31,8 @@ class GarminAuthError(RuntimeError):
 
 
 def _tokenstore_path(user_id: str) -> Path:
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", user_id):
+        raise GarminAuthError("invalid user_id")
     return TOKEN_STORE_ROOT / user_id
 
 
