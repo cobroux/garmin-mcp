@@ -14,6 +14,7 @@ import re
 import shutil
 from pathlib import Path
 from threading import Lock
+from typing import Any
 
 from garminconnect import (
     Garmin,
@@ -125,6 +126,16 @@ def disconnect(user_id: str) -> None:
     shutil.rmtree(_tokenstore_path(user_id), ignore_errors=True)
 
 
+def add_distance_km(activities: Any) -> Any:
+    """Garmin reports distance in metres; add a rounded `distance_km` next to it
+    on each activity in a list. Non-list results (e.g. error dicts) pass through."""
+    if isinstance(activities, list):
+        for a in activities:
+            if isinstance(a, dict) and a.get("distance") is not None:
+                a["distance_km"] = round(a["distance"] / 1000, 2)
+    return activities
+
+
 def build_activity_details(client: Garmin, activity_id: str) -> dict:
     """Normalized detail payload for one activity: summary stats, a GPS
     polyline (GPS-tracked activities only), per-lap splits, and strength
@@ -187,21 +198,25 @@ def build_activity_details(client: Garmin, activity_id: str) -> dict:
     except Exception:
         exercise_sets = []
 
+    # Garmin nests the stats (distance in metres, speeds in m/s) under summaryDTO.
+    stats = summary.get("summaryDTO") or summary
+    distance = stats.get("distance")
     activity_type = summary.get("activityType") or {}
     return {
         "activityId": summary.get("activityId", activity_id),
         "name": summary.get("activityName"),
         "sportType": activity_type.get("typeKey"),
         "startLocal": summary.get("startTimeLocal"),
-        "distance": summary.get("distance"),
-        "duration": summary.get("duration"),
-        "elevationGain": summary.get("elevationGain"),
-        "elevationLoss": summary.get("elevationLoss"),
-        "calories": summary.get("calories"),
-        "averageHR": summary.get("averageHR"),
-        "maxHR": summary.get("maxHR"),
-        "averageSpeed": summary.get("averageSpeed"),
-        "maxSpeed": summary.get("maxSpeed"),
+        "distance": distance,
+        "distance_km": round(distance / 1000, 2) if distance is not None else None,
+        "duration": stats.get("duration"),
+        "elevationGain": stats.get("elevationGain"),
+        "elevationLoss": stats.get("elevationLoss"),
+        "calories": stats.get("calories"),
+        "averageHR": stats.get("averageHR"),
+        "maxHR": stats.get("maxHR"),
+        "averageSpeed": stats.get("averageSpeed"),
+        "maxSpeed": stats.get("maxSpeed"),
         "polyline": polyline,
         "splits": splits,
         "exerciseSets": exercise_sets,
