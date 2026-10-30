@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from garmin_mcp.garmin_client import (
     GarminAuthError,
+    add_distance_km,
     build_activity_details,
     connect as garmin_connect,
     disconnect as garmin_disconnect,
@@ -105,7 +106,7 @@ def activities(user_id: str, since: str | None = None, limit: int = Query(50, ge
     if since:
         cutoff = dt.date.fromisoformat(since)
         acts = [a for a in acts if dt.date.fromisoformat(a["startTimeLocal"][:10]) >= cutoff]
-    return acts
+    return add_distance_km(acts)
 
 
 @app.get("/users/{user_id}/daily-summary", dependencies=[Depends(require_token)])

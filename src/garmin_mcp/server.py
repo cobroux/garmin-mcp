@@ -15,6 +15,7 @@ from starlette.responses import HTMLResponse, JSONResponse, RedirectResponse, Re
 
 from garmin_mcp.garmin_client import (
     GarminAuthError,
+    add_distance_km,
     build_activity_details,
     connect,
     disconnect,
@@ -181,7 +182,7 @@ def _register_rest_routes(server: FastMCP) -> None:
         acts = client.get_activities(start, limit)
         if cutoff:
             acts = [a for a in acts if dt.date.fromisoformat(a["startTimeLocal"][:10]) >= cutoff]
-        return JSONResponse(acts)
+        return JSONResponse(add_distance_km(acts))
 
     @server.custom_route("/users/{user_id}/daily-summary", methods=["GET"])
     async def rest_daily_summary(request: Request) -> Response:
@@ -226,7 +227,7 @@ def _call(fn, *args, **kwargs) -> Any:
                 raise GarminAuthError("GARMIN_EMAIL and GARMIN_PASSWORD environment variables must be set.")
             connect(_MCP_USER_ID, email, password)
         client = get_client(_MCP_USER_ID)
-        return getattr(client, fn)(*args, **kwargs)
+        return fn(client, *args, **kwargs) if callable(fn) else getattr(client, fn)(*args, **kwargs)
     except GarminAuthError as exc:
         return {"error": str(exc)}
 
@@ -245,7 +246,7 @@ def get_activities(limit: int = 10, start: int = 0) -> Any:
         limit: max number of activities to return.
         start: offset for pagination.
     """
-    return _call("get_activities", max(start, 0), min(max(limit, 1), 200))
+    return add_distance_km(_call("get_activities", max(start, 0), min(max(limit, 1), 200)))
 
 
 @mcp.tool()
@@ -254,7 +255,7 @@ def get_activity_details(activity_id: str) -> Any:
     (as returned by get_activities)."""
     if not activity_id.isdigit():
         raise ValueError("activity_id must be numeric.")
-    return _call("get_activity", activity_id)
+    return _call(build_activity_details, activity_id)
 
 
 @mcp.tool()
